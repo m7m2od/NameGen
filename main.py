@@ -1,13 +1,18 @@
+# %%
 import torch
 import random
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 words = open('names.txt', 'r').read().splitlines()
 chars = sorted(list(set(''.join(words))))
 stoi = {s: i + 1 for i, s in enumerate(chars)}
 stoi['.'] = 0
 itos = {i: s for s, i in stoi.items()}
+vocab_size = len(stoi)
 
 random.shuffle(words)
+
 block_size = 3
 
 def build_dataset(words):
@@ -39,23 +44,20 @@ for x, y in zip(Xtr[:5], Ytr[:5]):
         print(f"KeyError for x={x}, y={y}: {e}")
 
 
-
-# ----------------------
 class Linear:
     def __init__(self, input_size, output_size):
-        self.weights = torch.randn(input_size, output_size) / input_size**0.5
+        self.weight = torch.randn(input_size, output_size) / input_size**0.5
         self.bias = torch.zeros(output_size)
 
     def __call__(self, x):
-        return x @ self.weights + self.bias
+        return x @ self.weight + self.bias
 
     def __repr__(self):
-        return f"Linear({self.weights.shape[0]}, {self.weights.shape[1]})"
+        return f"Linear({self.weight.shape[0]}, {self.weight.shape[1]})"
 
     def parameters(self):
-        return [self.weights, self.bias]
+        return [self.weight, self.bias]
 
-# ----------------------
 class BatchNorm:
     def __init__(self,dim,eps=1e-5,momentum=0.1):
         self.eps = eps
@@ -91,7 +93,7 @@ class BatchNorm:
     def __repr__(self):
         return f"BatchNorm({self.gamma.shape[0]})"
 
-# ------------------------------------
+
 class Tanh:
     def __call__(self,x):
         self.out = torch.tanh(x)
@@ -103,4 +105,63 @@ class Tanh:
     def __repr__(self):
         return "Tanh()"
 
-# ------------------------------------
+
+n_embd = 10
+n_hidden = 200
+
+C = torch.randn(vocab_size, n_embd)
+embd = C[Xtr]
+
+layers = [
+    Linear(n_embd * block_size , n_hidden),
+    BatchNorm(n_hidden),
+    Tanh(),
+    Linear(n_hidden, vocab_size)
+]
+
+with torch.no_grad():
+    layers[-1].weight *= 0.1
+
+params = []
+for layer in layers:
+    params += layer.parameters()
+
+for param in params:
+    param.requires_grad = True
+
+
+# %%
+max_steps = 1000
+batch_size = 32
+lossi = []
+
+for step in range(max_steps):
+    ix = torch.randint(0, Xtr.shape[0], (batch_size,))
+    X = Xtr[ix]
+    Y = Ytr[ix]
+
+    # forward pass
+    emb = C[X]
+    x = emb.view(emb.shape[0], -1)
+    for layer in layers:
+        x = layer(x)
+
+    loss = F.cross_entropy(x, Y)
+
+    # backward pass
+    for p in params:
+        p.grad = None
+    loss.backward()
+
+    # update
+    lr = 0.1 if step < 1000 else 0.01
+    for p in params:
+        p.data += -lr * p.grad
+
+    # track stats
+    lossi.append(loss.item())
+    if step % 100 == 0:
+        print(f"step {step}: loss {loss.item():.4f}")
+
+# %%
+plt.plot(lossi)
