@@ -165,3 +165,46 @@ for step in range(max_steps):
 
 # %%
 plt.plot(lossi)
+
+# %%
+for layer in layers:
+    layer.training = False
+
+# %%
+
+@torch.no_grad()
+def split_loss(split):
+    x,y = {
+        'train': (Xtr, Ytr),
+        'val': (Xdev, Ydev),
+        'test': (Xte, Yte)
+    }[split]
+    emb = C[x]
+    x = emb.view(emb.shape[0], -1)
+    for layer in layers:
+        x = layer(x)
+    loss = F.cross_entropy(x, y)
+    print(f"loss for {split}: {loss.item():.4f}")
+
+split_loss('train')
+split_loss('val')
+split_loss('test')
+
+
+# %%
+for _ in range(20):
+    out = []
+    context = [0] * block_size
+    while True:
+        emb = C[torch.tensor([context])]
+        x = emb.view(emb.shape[0], -1)
+        for layer in layers:
+            x = layer(x)
+        logits = x
+        probs = F.softmax(logits, dim=1)
+        ix = torch.multinomial(probs, num_samples=1).item()
+        context = context[1:] + [ix]
+        out.append(ix)
+        if ix == 0:
+            break
+    print(''.join(itos[i] for i in out))
