@@ -120,7 +120,7 @@ class Embedding:
     def __repr__(self):
         return f"Embedding({self.weight.shape[0]}, {self.weight.shape[1]})"
 
-class flatten:
+class Flatten:
     def __call__(self, x):
         self.out = x.view(x.shape[0], -1)
         return self.out
@@ -131,29 +131,48 @@ class flatten:
     def __repr__(self):
         return "Flatten()"
 
+class Sequential:
+    def __init__(self, layers):
+        self.layers = layers
+
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        self.out = x
+        return self.out
+
+    def parameters(self):
+        params = []
+        for layer in self.layers:
+            params += layer.parameters()
+        return params
+
+    def __repr__(self):
+        return f"Sequential({', '.join(str(layer) for layer in self.layers)})"
+
+
 # %%
 n_embd = 10
 n_hidden = 200
-layers = [
+model = Sequential([
     Embedding(vocab_size, n_embd),
-    flatten(),
-    Linear(n_embd * block_size , n_hidden),
-    BatchNorm(n_hidden),
-    Tanh(),
+    Flatten(),
+    Linear(n_embd * block_size , n_hidden), BatchNorm(n_hidden), Tanh(),
     Linear(n_hidden, vocab_size)
-]
+])
+
 with torch.no_grad():
-    layers[-1].weight *= 0.1
-params = []
-for layer in layers:
-    params += layer.parameters()
+    model.layers[-1].weight *= 0.1
+
+params = model.parameters()
+
 for param in params:
     param.requires_grad = True
 
 print(sum(param.nelement() for param in params ))
 
 # %%
-max_steps = 10000
+max_steps = 100000
 batch_size = 32
 lossi = []
 
@@ -163,10 +182,8 @@ for step in range(max_steps):
     Y = Ytr[ix]
 
     # forward pass
-    x = X
-    for layer in layers:
-        x = layer(x)
-    loss = F.cross_entropy(x, Y)
+    logits = model(X)
+    loss = F.cross_entropy(logits, Y)
 
     # backward pass
     for p in params:
@@ -180,17 +197,18 @@ for step in range(max_steps):
 
     # track stats
     lossi.append(loss.item())
-    if step % 100 == 0:
+    if step % 10000 == 0:
         print(f"step {step}: loss {loss.item():.4f}")
-    break
+
 
 # %%
 lossi = torch.tensor(lossi).view(-1, 1000).mean(1)
 plt.plot(lossi)
 
 # %%
-for layer in layers:
+for layer in model.layers:
     layer.training = False
+
 # %%
 @torch.no_grad()
 def split_loss(split):
@@ -199,10 +217,8 @@ def split_loss(split):
         'val': (Xdev, Ydev),
         'test': (Xte, Yte)
     }[split]
-
-    for layer in layers:
-        x = layer(x)
-    loss = F.cross_entropy(x, y)
+    logits = model(x)
+    loss = F.cross_entropy(logits, y)
     print(f"loss for {split}: {loss.item():.4f}")
 
 split_loss('train')
@@ -214,10 +230,7 @@ for _ in range(20):
     out = []
     context = [0] * block_size
     while True:
-        x = torch.tensor([context])
-        for layer in layers:
-            x = layer(x)
-        logits = x
+        logits = model(torch.tensor([context]))
         probs = F.softmax(logits, dim=1)
         ix = torch.multinomial(probs, num_samples=1).item()
         context = context[1:] + [ix]
