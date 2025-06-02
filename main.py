@@ -1,4 +1,5 @@
 # %%
+from numpy import subtract
 import torch
 import random
 import torch.nn.functional as F
@@ -11,10 +12,9 @@ stoi['.'] = 0
 itos = {i: s for s, i in stoi.items()}
 vocab_size = len(stoi)
 
+# %%
 random.shuffle(words)
-
 block_size = 3
-
 def build_dataset(words):
     X, Y = [], []
     for w in words:
@@ -43,6 +43,7 @@ for x, y in zip(Xtr[:5], Ytr[:5]):
     except KeyError as e:
         print(f"KeyError for x={x}, y={y}: {e}")
 
+# %%
 
 class Linear:
     def __init__(self, input_size, output_size):
@@ -105,33 +106,54 @@ class Tanh:
     def __repr__(self):
         return "Tanh()"
 
+class Embedding:
+    def __init__(self, num_embeddings, embedding_dim):
+        self.weight = torch.randn(num_embeddings, embedding_dim)
 
+    def __call__(self, x):
+        self.out = self.weight[x]
+        return self.out
+
+    def parameters(self):
+        return [self.weight]
+
+    def __repr__(self):
+        return f"Embedding({self.weight.shape[0]}, {self.weight.shape[1]})"
+
+class flatten:
+    def __call__(self, x):
+        self.out = x.view(x.shape[0], -1)
+        return self.out
+
+    def parameters(self):
+        return []
+
+    def __repr__(self):
+        return "Flatten()"
+
+# %%
 n_embd = 10
 n_hidden = 200
-
-C = torch.randn(vocab_size, n_embd)
-embd = C[Xtr]
-
 layers = [
+    Embedding(vocab_size, n_embd),
+    flatten(),
     Linear(n_embd * block_size , n_hidden),
     BatchNorm(n_hidden),
     Tanh(),
     Linear(n_hidden, vocab_size)
 ]
-
 with torch.no_grad():
     layers[-1].weight *= 0.1
-
 params = []
 for layer in layers:
     params += layer.parameters()
-
 for param in params:
     param.requires_grad = True
 
+print(sum(param.nelement() for param in params ))
 
 # %%
-max_steps = 1000
+max_steps = 10000
 batch_size = 32
 lossi = []
 
@@ -141,11 +163,9 @@ for step in range(max_steps):
     Y = Ytr[ix]
 
     # forward pass
-    emb = C[X]
-    x = emb.view(emb.shape[0], -1)
+    x = X
     for layer in layers:
         x = layer(x)
-
     loss = F.cross_entropy(x, Y)
 
     # backward pass
@@ -162,16 +182,16 @@ for step in range(max_steps):
     lossi.append(loss.item())
     if step % 100 == 0:
         print(f"step {step}: loss {loss.item():.4f}")
+    break
 
 # %%
+lossi = torch.tensor(lossi).view(-1, 1000).mean(1)
 plt.plot(lossi)
 
 # %%
 for layer in layers:
     layer.training = False
-
 # %%
-
 @torch.no_grad()
 def split_loss(split):
     x,y = {
@@ -179,8 +199,7 @@ def split_loss(split):
         'val': (Xdev, Ydev),
         'test': (Xte, Yte)
     }[split]
-    emb = C[x]
-    x = emb.view(emb.shape[0], -1)
+
     for layer in layers:
         x = layer(x)
     loss = F.cross_entropy(x, y)
@@ -190,14 +209,12 @@ split_loss('train')
 split_loss('val')
 split_loss('test')
 
-
 # %%
 for _ in range(20):
     out = []
     context = [0] * block_size
     while True:
-        emb = C[torch.tensor([context])]
-        x = emb.view(emb.shape[0], -1)
+        x = torch.tensor([context])
         for layer in layers:
             x = layer(x)
         logits = x
@@ -208,3 +225,4 @@ for _ in range(20):
         if ix == 0:
             break
     print(''.join(itos[i] for i in out))
+# %%
