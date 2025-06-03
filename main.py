@@ -72,9 +72,14 @@ class BatchNorm:
         self.running_var = torch.ones(dim)
 
     def __call__(self,x):
+
         if self.training:
-            xmean = x.mean(0, keepdim=True)
-            xvar = x.var(0, keepdim=True)
+            if x.ndim == 2:
+                dim = 0
+            elif x.ndim ==3:
+                dim = (0,1)
+            xmean = x.mean(dim, keepdim=True)
+            xvar = x.var(dim, keepdim=True)
         else:
             xmean = self.running_mean
             xvar = self.running_var
@@ -120,9 +125,17 @@ class Embedding:
     def __repr__(self):
         return f"Embedding({self.weight.shape[0]}, {self.weight.shape[1]})"
 
-class Flatten:
+class FlattenConsecutive:
+
+    def __init__(self,n):
+        self.n = n
+
     def __call__(self, x):
-        self.out = x.view(x.shape[0], -1)
+        B, T, C = x.shape
+        x = x.view(B, T//self.n, C*self.n)
+        if x.shape[1] == 1:
+            x = x.squeeze(1)
+        self.out = x
         return self.out
 
     def parameters(self):
@@ -156,7 +169,7 @@ n_embd = 10
 n_hidden = 200
 model = Sequential([
     Embedding(vocab_size, n_embd),
-    Flatten(),
+    FlattenConsecutive(block_size),
     Linear(n_embd * block_size , n_hidden), BatchNorm(n_hidden), Tanh(),
     Linear(n_hidden, vocab_size)
 ])
@@ -238,4 +251,7 @@ for _ in range(20):
         if ix == 0:
             break
     print(''.join(itos[i] for i in out))
+
 # %%
+
+list(range(10))[:]
